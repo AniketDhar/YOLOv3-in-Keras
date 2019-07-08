@@ -118,9 +118,8 @@ def get_training_data(annotation_path, data_path, input_shape, max_boxes=100, lo
                     line = line.strip().split(' ')
                     line.append(line.pop(0))
                     print(line)
-
-                box_data.append(line)
-            count = count + 1  
+                    box_data.append(line)
+        count = count + 1  
     
     image_data = np.array(image_data)
     box_data = np.array(box_data)
