@@ -2,15 +2,17 @@
 Darknet-52 for YOLOv3
 Created on: 26th June, 2019
 Created by: aniket.dhar@topic.nl
-https://github.com/Basasuya/basasuya-yolo3/blob/master/yolo3/model.py
 '''
 
 import keras
+import tensorflow as tf
+import keras.backend as K
 from keras.models import Model
 from keras.layers import Conv2D, BatchNormalization, Input, Activation, add, GlobalAveragePooling2D, Dense, UpSampling2D, Concatenate
 from keras.layers.advanced_activations import LeakyReLU
 from keras.regularizers import l2
 from keras.callbacks import TensorBoard, ModelCheckpoint, EarlyStopping
+import numpy as np
 
 
 def Conv2D_BN_Leaky(x, filters, kernels, strides=1):
@@ -34,6 +36,7 @@ def Conv2D_BN_Leaky(x, filters, kernels, strides=1):
     x = Conv2D(filters, kernels,
                padding=padding,
                strides=strides,
+               use_bias=False,
                activation='linear',
                kernel_regularizer=l2(5e-4))(x)
     x = BatchNormalization()(x)
@@ -117,7 +120,7 @@ def make_last_layers(x, num_filters, out_filters):
     return x, y
 
 
-def yolo_body(num_anchors, num_classes):
+def yolo_body(inputs, num_anchors, num_classes):
     """Create YOLO_V3 model CNN body in Keras."""
     inputs = Input(shape=(416, 416, 3))
     
@@ -165,8 +168,7 @@ def yolo_head(feats, anchors, num_classes, input_shape):
     grid = K.concatenate([grid_x, grid_y])
     grid = K.cast(grid, K.dtype(feats))
 
-    feats = K.reshape(
-        feats, [-1, grid_shape[0], grid_shape[1], num_anchors, num_classes + 5])
+    feats = K.reshape(feats, [-1, grid_shape[0], grid_shape[1], num_anchors, num_classes + 5])
 
     box_xy = K.sigmoid(feats[..., :2])
     box_wh = K.exp(feats[..., 2:4])
@@ -261,7 +263,7 @@ def yolo_eval(yolo_outputs,
     return boxes_, scores_, classes_
 
 
-def preprocess_true_boxes(true_boxes, input_shape, anchors, num_classes):
+def preprocess_true_boxes(box_data, input_shape, anchors, num_classes):
     '''Preprocess true boxes to training input format
     Parameters
     ----------
@@ -274,9 +276,9 @@ def preprocess_true_boxes(true_boxes, input_shape, anchors, num_classes):
     -------
     y_true: list of array, shape like yolo_outputs, xywh are reletive value
     '''
-    num_classes = 11
-    input_shape = (416, 416)
-    anchors = np.array(((10,13), (16,30), (33,23), (30,61), (62,45), (59,119), (116,90), (156,198), (373,326)))
+    #num_classes = 11
+    #input_shape = (416, 416)
+    #anchors = np.array(((10,13), (16,30), (33,23), (30,61), (62,45), (59,119), (116,90), (156,198), (373,326)))
     anchor_mask = [[6,7,8], [3,4,5], [0,1,2]]
     input_shape = np.array(input_shape)
     grid_shapes = [input_shape//{0:32, 1:16, 2:8}[l] for l in range(3)]
@@ -327,22 +329,20 @@ def preprocess_true_boxes(true_boxes, input_shape, anchors, num_classes):
 
         # Find best anchor for each true box
         best_anchor = np.argmax(iou, axis=-1)
-        print(best_anchor)
+        #print(best_anchor)
 
         for t, n in enumerate(best_anchor):
             for l in range(3):
-                print(l)
                 if n in anchor_mask[l]:
-                    print('Ahoy!!')
                     i = np.floor(box_data[b, 0]*grid_shapes[l][1]).astype('int32')
                     j = np.floor(box_data[b, 1]*grid_shapes[l][0]).astype('int32')
                     n = anchor_mask[l].index(n)
-                    print(b,j,i,n)
+                    #print(b,j,i,n)
                     c = box_data[b, 4].astype('int32')
                     y_true[l][b, j, i, n, 0:4] = box_data[b, 0:4]
                     y_true[l][b, j, i, n, 4] = 1
                     y_true[l][b, j, i, n, 5+c] = 1
-                    print(y_true[l][b, j, i, n, :])
+                    #print(y_true[l][b, j, i, n, :])
                     break
     return y_true
 
@@ -382,7 +382,7 @@ def box_iou(b1, b2):
     b2_area = b2_wh[..., 0] * b2_wh[..., 1]
     iou = intersect_area / (b1_area + b2_area - intersect_area)
 
-return iou
+    return iou
 
 
 def yolo_loss(args, anchors, num_classes, ignore_thresh=.5):
@@ -442,9 +442,3 @@ def yolo_loss(args, anchors, num_classes, ignore_thresh=.5):
         loss += K.sum(box_loss) + K.sum(confidence_loss) + K.sum(class_loss)
     return loss / K.cast(m, K.dtype(loss))
 
-
-
-if __name__ == '__main__':
-    model = yolo_body(4, 10)
-    print(model.summary())
-    print(model.output_shape)
