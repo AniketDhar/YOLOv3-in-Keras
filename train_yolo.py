@@ -2,9 +2,11 @@ import os
 import sys
 import numpy as np
 from yolov3 import *
+import keras.backend as K
 from keras.layers import Input, Lambda
 from keras.models import load_model, Model
 from keras.callbacks import TensorBoard, ModelCheckpoint, EarlyStopping
+from PIL import Image
 
 
 
@@ -17,19 +19,18 @@ def _main():
     label_path = '../datacleaning/labels/'
     data_path = '../datacleaning/images/'
     output_path = '../model_data/my_yolo.h5'
-    log_dir = 'logs/000/'
+    log_dir = '../logs/000/'
     classes_path = 'tool_classes.txt'
     anchors_path = 'yolo_anchors.txt'
     class_names = get_classes(classes_path)
     anchors = get_anchors(anchors_path)
 
     input_shape = (416,416) # multiple of 32
-    image_data, box_data = get_training_data(label_path, data_path,
-        input_shape, max_boxes=100, load_previous=True)
+    
+    image_data, box_data = get_training_data(label_path, data_path, input_shape, max_boxes=100, load_previous=False)
     y_true = preprocess_true_boxes(box_data, input_shape, anchors, len(class_names))
 
-    infer_model, model = create_model(input_shape, anchors, len(class_names),
-        load_pretrained=True, freeze_body=True)
+    infer_model, model = create_model(input_shape, anchors, len(class_names), load_pretrained=True, freeze_body=True)
 
     train(model, image_data/255., y_true, log_dir=log_dir)
 
@@ -96,20 +97,22 @@ def get_training_data(annotation_path, data_path, input_shape, max_boxes=100, lo
     print('Saving training data into ' + data_path)
     return image_data, box_data
     '''
-    data_path = os.path.abspath('data/')
+    data_path = os.path.abspath('../data/')
 
-    dir_labels = os.path.abspath('labels/')
-    dir_images = os.path.abspath('images/')
+    dir_labels = os.path.abspath('../datacleaning/labels/')
+    dir_images = os.path.abspath('../datacleaning/images/')
     count = 0
-    max_boxes = 20
+    #max_boxes = 20
     image_data = []
     box_data = []
 
     for label in os.listdir(dir_labels):
-        if count < 3:
-            print(dir_labels)
+        if count < 6:
+            #print(dir_labels)
             filename = dir_images + '/' + label.rsplit('.', 1)[0]+'.png'
             print(filename)
+            if os.path.isfile(filename) is False:
+                continue
             image = Image.open(filename)
             image_data.append(np.array(image, dtype='uint8'))
 
@@ -117,18 +120,18 @@ def get_training_data(annotation_path, data_path, input_shape, max_boxes=100, lo
                 for line in l.readlines():
                     line = line.strip().split(' ')
                     line.append(line.pop(0))
-                    print(line)
-                    box_data.append(line)
-        count = count + 1  
+                    #print(line)
+
+                box_data.append(line)
+            count = count + 1  
     
     image_data = np.array(image_data)
     box_data = np.array(box_data)
     np.savez(data_path, image_data=image_data, box_data=box_data)
     print('Saving training data into ' + data_path)
-    print(box_data)
+    print(box_data.shape)
 
     return image_data, box_data
-
 
 
 def create_model(input_shape, anchors, num_classes, load_pretrained=True, freeze_body=True):
@@ -143,10 +146,10 @@ def create_model(input_shape, anchors, num_classes, load_pretrained=True, freeze
     model_body = yolo_body(image_input, num_anchors, num_classes)
 
     if load_pretrained:
-        weights_path = os.path.join('model_data', 'yolo_weights.h5')
+        weights_path = os.path.join('../model_data', 'yolo.h5')
         if not os.path.exists(weights_path):
             print("CREATING WEIGHTS FILE" + weights_path)
-            yolo_path = os.path.join('model_data', 'yolo.h5')
+            yolo_path = os.path.join('../model_data', 'yolo.h5')
             model_body = load_model(yolo_path, compile=False)
             model_body.save_weights(weights_path)
         model_body.load_weights(weights_path, by_name=True, skip_mismatch=True)
@@ -156,19 +159,18 @@ def create_model(input_shape, anchors, num_classes, load_pretrained=True, freeze
                 model_body.layers[i].trainable = False
 
     model_loss = Lambda(yolo_loss, output_shape=(1,), name='yolo_loss',
-        arguments={'anchors': anchors, 'num_classes': num_classes})(
-        [*model_body.output, *y_true])
+            arguments={'anchors': anchors, 'num_classes': num_classes})([*model_body.output, *y_true])
     model = Model([model_body.input, *y_true], model_loss)
 
     return model_body, model
 
 
-def train(model, image_data, y_true, log_dir='logs/'):
+def train(model, image_data, y_true, log_dir='../logs/'):
     '''retrain/fine-tune the model'''
     model.compile(optimizer='adam', loss={
         # use custom yolo_loss Lambda layer.
         'yolo_loss': lambda y_true, y_pred: y_pred})
-
+    
     logging = TensorBoard(log_dir=log_dir)
     checkpoint = ModelCheckpoint(log_dir + "ep{epoch:03d}-loss{loss:.3f}-val_loss{val_loss:.3f}.h5",
         monitor='val_loss', save_weights_only=True, save_best_only=True)
@@ -177,8 +179,12 @@ def train(model, image_data, y_true, log_dir='logs/'):
     model.fit([image_data, *y_true],
               np.zeros(len(image_data)),
               validation_split=.1,
-              batch_size=32,
-              epochs=30,
+              batch_size=2,
+              epochs=10,
               callbacks=[logging, checkpoint, early_stopping])
     model.save_weights(log_dir + 'trained_weights.h5')
+    
 # Further training.
+
+if __name__ == '__main__':
+    _main()
